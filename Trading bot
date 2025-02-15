@@ -1,0 +1,144 @@
+ //+------------------------------------------------------------------+
+//|                                                      Bot_v1.mq5  |
+//|                        Converted from Python to MQL5             |
+//+------------------------------------------------------------------+
+#include <Trade/Trade.mqh>  // Include the trade library for order management
+
+// Input parameters
+input double LotSize = 0.5;          // Fixed lot size per trade
+input bool UsePercentageRisk = false; // Use percentage-based risk (1% of account balance)
+input double RiskPerTradePercent = 1; // Risk per trade as a percentage
+input double DailyLossLimitPercent = 4; // Daily loss limit as a percentage
+input int MaxPositionsPerPair = 3;   // Maximum positions per pair
+
+// Global variables
+double DailyLossLimit;               // Daily loss limit in account currency
+double RiskPerTrade;                 // Risk per trade in account currency
+double AccountBalance;               // Current account balance
+int OpenPositions;                   // Number of open positions for the current symbol
+CTrade trade;                        // Trade object for order execution
+
+//+------------------------------------------------------------------+
+//| Expert initialization function                                   |
+//+------------------------------------------------------------------+
+int OnInit()
+  {
+   // Calculate risk and daily loss limit
+   AccountBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   RiskPerTrade = UsePercentageRisk ? AccountBalance * (RiskPerTradePercent / 100) : LotSize;
+   DailyLossLimit = AccountBalance * (DailyLossLimitPercent / 100);
+
+   // Print initialization details
+   Print("Account Balance: ", AccountBalance);
+   Print("Risk Per Trade: ", RiskPerTrade);
+   Print("Daily Loss Limit: ", DailyLossLimit);
+
+   return(INIT_SUCCEEDED);
+  }
+
+//+------------------------------------------------------------------+
+//| Expert deinitialization function                                 |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+  {
+   // Cleanup code (if needed)
+  }
+
+//+------------------------------------------------------------------+
+//| Expert tick function                                             |
+//+------------------------------------------------------------------+
+void OnTick()
+  {
+   // Check daily loss limit
+   if(AccountInfoDouble(ACCOUNT_PROFIT) <= -DailyLossLimit)
+     {
+      Print("Daily loss limit reached. Stopping trading for the day.");
+      return;
+     }
+
+   // Fetch historical data for multiple timeframes
+   double weeklyHigh = iHigh(_Symbol, PERIOD_W1, 1);
+   double weeklyLow = iLow(_Symbol, PERIOD_W1, 1);
+   double dailyHigh = iHigh(_Symbol, PERIOD_D1, 1);
+   double dailyLow = iLow(_Symbol, PERIOD_D1, 1);
+   double fourHourHigh = iHigh(_Symbol, PERIOD_H4, 1);
+   double fourHourLow = iLow(_Symbol, PERIOD_H4, 1);
+
+   // Identify trends
+   string weeklyTrend = iClose(_Symbol, PERIOD_W1, 1) > iOpen(_Symbol, PERIOD_W1, 1) ? "bullish" : "bearish";
+   string dailyTrend = iClose(_Symbol, PERIOD_D1, 1) > iOpen(_Symbol, PERIOD_D1, 1) ? "bullish" : "bearish";
+   string fourHourTrend = iClose(_Symbol, PERIOD_H4, 1) > iOpen(_Symbol, PERIOD_H4, 1) ? "bullish" : "bearish";
+
+   // Check if trends align
+   if(weeklyTrend == dailyTrend && dailyTrend == fourHourTrend)
+     {
+      // Identify POI (Point of Interest) using Fibonacci retracement
+      double bosHigh = iHigh(_Symbol, PERIOD_H4, 1);
+      double bosLow = iLow(_Symbol, PERIOD_H4, 1);
+      double sweepHigh = iHigh(_Symbol, PERIOD_H4, 2);
+      double sweepLow = iLow(_Symbol, PERIOD_H4, 2);
+
+      double fibLevel50 = bosHigh - (bosHigh - sweepLow) * 0.5;
+
+      // Check if price is near the 0.5 Fibonacci level
+      double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      if(MathAbs(currentPrice - fibLevel50) <= 10 * SymbolInfoDouble(_Symbol, SYMBOL_POINT))
+        {
+         // Check for price action confirmation (e.g., bullish engulfing)
+         if(IsBullishEngulfing(PERIOD_M5))
+           {
+            // Check maximum positions per pair
+            if(OpenPositions < MaxPositionsPerPair)
+              {
+               // Calculate position size
+               double positionSize = UsePercentageRisk ? RiskPerTrade : LotSize;
+
+               // Place buy order
+               double stopLoss = fibLevel50 - 100 * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+               double takeProfit = fibLevel50 + 200 * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+
+               trade.Buy(positionSize, _Symbol, currentPrice, stopLoss, takeProfit, "Buy Order");
+               OpenPositions++;
+              }
+            else
+              {
+               Print("Maximum positions reached for ", _Symbol);
+              }
+           }
+        }
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| Check for bullish engulfing pattern                              |
+//+------------------------------------------------------------------+
+bool IsBullishEngulfing(ENUM_TIMEFRAMES timeframe)
+  {
+   double prevOpen = iOpen(_Symbol, timeframe, 2);
+   double prevClose = iClose(_Symbol, timeframe, 2);
+   double currOpen = iOpen(_Symbol, timeframe, 1);
+   double currClose = iClose(_Symbol, timeframe, 1);
+
+   if(prevClose < prevOpen && currClose > currOpen && currClose > prevOpen)
+     {
+      return true;
+     }
+   return false;
+  }
+
+//+------------------------------------------------------------------+
+//| Check for bearish engulfing pattern                              |
+//+------------------------------------------------------------------+
+bool IsBearishEngulfing(ENUM_TIMEFRAMES timeframe)
+  {
+   double prevOpen = iOpen(_Symbol, timeframe, 2);
+   double prevClose = iClose(_Symbol, timeframe, 2);
+   double currOpen = iOpen(_Symbol, timeframe, 1);
+   double currClose = iClose(_Symbol, timeframe, 1);
+
+   if(prevClose > prevOpen && currClose < currOpen && currClose < prevOpen)
+     {
+      return true;
+     }
+   return false;
+  }
